@@ -1,5 +1,8 @@
 package com.dobrihlopez.simplex_gomori_calculator
 
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.ensureActive
+
 /**
  * Упрощённый пример симплекс-метода (с отсечениями Гомори),
  * как в тексте задачи. Код адаптирован под нужды проекта.
@@ -17,6 +20,18 @@ object SwappingColumnsRowsExample {
         val colVars: MutableList<String>
     )
 
+    // Чтобы сохранить "снимок" таблицы, удобно сделать метод-расширение:
+    private fun SimplexTable.toSnapshot(title: String): TableSnapshot {
+        // Преобразуем matrix в List<List<Double>>
+        val matrixAsList = this.matrix.map { row -> row.toList() }
+        return TableSnapshot(
+            stepTitle = title,
+            matrix = matrixAsList,
+            rowVars = this.rowVars.toList(),
+            colVars = this.colVars.toList()
+        )
+    }
+
     // -------------------- Печать таблицы --------------------
 
     fun printTable(st: SimplexTable) {
@@ -33,7 +48,13 @@ object SwappingColumnsRowsExample {
 
     // -------------------- Правило прямоугольника (pivot) --------------------
 
-    fun doPivot(st: SimplexTable, r: Int, s: Int) {
+    fun doPivot(
+        st: SimplexTable,
+        r: Int,
+        s: Int,
+        snapshots: MutableList<TableSnapshot>? = null, // добавим параметр для логирования
+        stepName: String = "Pivot"
+    ) {
         val (matrix, rowVars, colVars) = st
         val old = matrix.map { it.copyOf() }
         val pivot = old[r][s]
@@ -55,8 +76,10 @@ object SwappingColumnsRowsExample {
         val temp = rowVars[r]
         rowVars[r] = colVars[s]
         colVars[s] = temp
-    }
 
+        // Сохраняем снимок таблицы
+        snapshots?.add(st.toSnapshot("$stepName (строка=$r, столбец=$s)"))
+    }
     // -------------------- Поиск pivot-элементов (упрощённый) --------------------
 
     fun findPivotColForOpt(st: SimplexTable): Int? {
@@ -89,10 +112,10 @@ object SwappingColumnsRowsExample {
         return pivotRow
     }
 
-    fun solveSimplexPhase1(st: SimplexTable): Boolean {
+    fun solveSimplexPhase1(st: SimplexTable, snapshots: MutableList<TableSnapshot>? = null): Boolean {
         var fixedSomething = false
         while (true) {
-            // 1) ищем строку с отрицательным RHS
+            // 1) ищем строку с отрицательным ЗБП
             var pivotRow: Int? = null
             for (i in 0 until st.matrix.size - 1) {
                 if (st.matrix[i][0] < -1e-6) {
@@ -100,7 +123,7 @@ object SwappingColumnsRowsExample {
                     break
                 }
             }
-            // если не нашли, все RHS >= 0 => план допустим
+            // если не нашли, все ЗБП >= 0 => план опорный
             if (pivotRow == null) break
 
             // 2) ищем столбец с отрицательным коэффициентом
@@ -115,19 +138,19 @@ object SwappingColumnsRowsExample {
             if (pivotCol == null) break
 
             // 3) pivot
-            doPivot(st, pivotRow, pivotCol)
+            doPivot(st, pivotRow, pivotCol, snapshots, "Пересчёт симплекс-таблицы")
             fixedSomething = true
         }
         return fixedSomething
     }
 
-    fun solveSimplex(st: SimplexTable): Boolean {
+    fun solveSimplex(st: SimplexTable, snapshots: MutableList<TableSnapshot>? = null): Boolean {
         while (true) {
-            solveSimplexPhase1(st)
+            solveSimplexPhase1(st, snapshots)
 
             val pivotCol = findPivotColForOpt(st) ?: return true // нет отриц => оптимум
             val pivotRow = findPivotRowForOpt(st, pivotCol) ?: return false // неограниченно
-            doPivot(st, pivotRow, pivotCol)
+            doPivot(st, pivotRow, pivotCol, snapshots, "Пересчёт симплекс-таблицы")
         }
     }
 
@@ -146,24 +169,45 @@ object SwappingColumnsRowsExample {
 
     // -------------------- ЦЕЛОЧИСЛЕННОСТЬ: метод Гомори --------------------
 
-    fun solveIntegerSimplex(st: SimplexTable): Pair<Boolean, String> {
-        var iteration = 0
-        while (true) {
-            val isOptimal = solveSimplex(st)
-            if (!isOptimal) return false to "Функция неограничена"
+    suspend fun solveIntegerSimplex(st: SimplexTable): Pair<Boolean, String> {
+        return coroutineScope {
+            // Список «снимков» для всех шагов
+            val snapshots = mutableListOf<TableSnapshot>()
+            // Добавим в начало «исходную» таблицу
+            snapshots.add(st.toSnapshot("Начальная таблица"))
 
-            // Проверка целочисленности
-            val (varName, _) = findNonIntegerVariable(st) ?: return true to "Оптимальное целочисленное решение найдено"
+            var iteration = 0
+            while (true) {
+                val isOptimal = solveSimplex(st, snapshots)
+                if (!isOptimal) {
+                    // Возвращаем "ложь" и сами snapshots не возвращаем из метода напрямую,
+                    // но мы можем сохранить их во временное поле или вернуть в другом формате.
+                    // Для примера будем хранить их в Companion-объекте, чтобы потом ViewModel мог забрать.
+                    latestSnapshots = snapshots
+                    return@coroutineScope false to "Функция неограничена"
+                }
 
-            // Добавляем отсечение
-            if (!addGomoryCut(st, varName)) {
-                return false to "Нет целочисленного решения (отсечение невозможно)"
+                // Проверка целочисленности
+                val (varName, _) = findNonIntegerVariable(st) ?: run {
+                    // если не нашли нецелых переменных -> всё ок
+                    latestSnapshots = snapshots
+                    return@coroutineScope true to "Оптимальное целочисленное решение найдено"
+                }
+
+                // Добавляем отсечение
+                if (!addGomoryCut(st, varName, snapshots)) {
+                    latestSnapshots = snapshots
+                    return@coroutineScope false to "Нет целочисленного решения (отсечение невозможно)"
+                }
+
+                iteration++
+                if (iteration > 20) {
+                    latestSnapshots = snapshots
+                    return@coroutineScope false to "Слишком много итераций, решение не найдено"
+                }
+                ensureActive()
             }
-
-            iteration++
-            if (iteration > 20) {
-                return false to "Слишком много итераций, решение не найдено"
-            }
+            error("illegal state")
         }
     }
 
@@ -181,7 +225,11 @@ object SwappingColumnsRowsExample {
         return if (selectedVar.isNotEmpty()) selectedVar to maxFraction else null
     }
 
-    fun addGomoryCut(st: SimplexTable, varName: String): Boolean {
+    fun addGomoryCut(
+        st: SimplexTable,
+        varName: String,
+        snapshots: MutableList<TableSnapshot>? = null
+    ): Boolean {
         val row = st.rowVars.indexOf(varName)
         if (row == -1) return false
 
@@ -197,9 +245,14 @@ object SwappingColumnsRowsExample {
         newMatrixList.add(fIndex, newCutRow)
         st.matrix = newMatrixList.toTypedArray()
 
-        val cutVarName = "cut${st.rowVars.size + st.colVars.size}"
+        val cutVarName = "x${st.rowVars.size + st.colVars.size - 1}"
         st.rowVars.add(fIndex, cutVarName)
 
+        snapshots?.add(st.toSnapshot("Вводим новое ограничение $varName -> $cutVarName"))
         return true
     }
+
+    // Храним последние полученные шаги (снимки) во временном поле,
+    // чтобы потом забрать их во ViewModel (или вернуть из метода, как вам удобнее).
+    var latestSnapshots: List<TableSnapshot> = emptyList()
 }

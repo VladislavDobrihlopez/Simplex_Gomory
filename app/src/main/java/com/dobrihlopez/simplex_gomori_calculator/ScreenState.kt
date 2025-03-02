@@ -1,12 +1,24 @@
 package com.dobrihlopez.simplex_gomori_calculator
 
 /**
+ * Снимок таблицы
+ */
+data class TableSnapshot(
+    val stepTitle: String,
+    val matrix: List<List<Double>>,
+    val rowVars: List<String>,
+    val colVars: List<String>
+)
+
+/**
  * Состояние экрана:
  *  - входные данные (запасы, расход, доход)
  *  - результаты (x1, x2, maxIncome)
  *  - флаги и списки для ошибок валидации
  */
 data class MainViewState(
+    val isLoaderShown: Boolean = false,
+
     // Запасы материалов
     val fabricSupply: Double = 150.0,
     val syntheponSupply: Double = 130.0,
@@ -34,6 +46,9 @@ data class MainViewState(
 
     // Ошибки валидации
     val validationErrors: List<String> = emptyList(),
+
+    // Все "снимки" таблиц на каждом шаге
+    val snapshots: List<TableSnapshot> = emptyList()
 )
 
 /**

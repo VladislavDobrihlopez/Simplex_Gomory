@@ -1,9 +1,13 @@
 package com.dobrihlopez.simplex_gomori_calculator
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * ViewModel, в котором храним:
@@ -43,7 +47,8 @@ class MainViewModel : ViewModel() {
                 x2 = 0.0,
                 maxIncome = 0.0,
                 solutionFound = false,
-                validationErrors = emptyList()
+                validationErrors = emptyList(),
+                snapshots = emptyList()
             )
         }
     }
@@ -104,36 +109,46 @@ class MainViewModel : ViewModel() {
      * Используем код из объекта [SwappingColumnsRowsExample], адаптируя под пользовательские данные.
      */
     private fun solveILP(state: MainViewState) {
-        val st = buildTableFromState(state)
-
-        // Запускаем целочисленный симплекс
-        val (success, message) = SwappingColumnsRowsExample.solveIntegerSimplex(st)
-        if (!success) {
-            // Если нет решения / неограничено / др. ошибка
-            _uiState.update {
-                it.copy(
-                    validationErrors = listOf("Решение не найдено: $message"),
-                    solutionFound = false
-                )
-            }
-            return
+        _uiState.update {
+            it.copy(isLoaderShown = true)
         }
 
-        // Извлекаем результат
-        val (x1, x2) = SwappingColumnsRowsExample.getSolution(st)
-        // Считаем целевую функцию (макс. доход)
-        val F = computeF(x1, x2, state.incomeToy1, state.incomeToy2)
+        viewModelScope.launch(Dispatchers.Default) {
+            val st = buildTableFromState(state)
+            val (success, message) = SwappingColumnsRowsExample.solveIntegerSimplex(st)
 
-        _uiState.update {
-            it.copy(
-                x1 = x1,
-                x2 = x2,
-                maxIncome = F,
-                solutionFound = true
-            )
+            if (!success) {
+                // Ошибка
+                withContext(Dispatchers.Main) {
+                    _uiState.update {
+                        it.copy(
+                            isLoaderShown = false,
+                            validationErrors = listOf("Решение не найдено: $message"),
+                            solutionFound = false,
+                            snapshots = SwappingColumnsRowsExample.latestSnapshots // даже если не найдено, можно показать шаги
+                        )
+                    }
+                }
+                return@launch
+            }
+
+            // Успех
+            val (x1, x2) = SwappingColumnsRowsExample.getSolution(st)
+            val F = computeF(x1, x2, state.incomeToy1, state.incomeToy2)
+            withContext(Dispatchers.Main) {
+                _uiState.update {
+                    it.copy(
+                        x1 = x1,
+                        x2 = x2,
+                        maxIncome = F,
+                        solutionFound = true,
+                        isLoaderShown = false,
+                        snapshots = SwappingColumnsRowsExample.latestSnapshots
+                    )
+                }
+            }
         }
     }
-
     /**
      * Формируем симплекс-таблицу из пользовательских данных.
      * Аналогично buildInitialTable(), но коэффициенты берём из state.
@@ -162,7 +177,7 @@ class MainViewModel : ViewModel() {
             doubleArrayOf(0.0, -s.incomeToy1, -s.incomeToy2)
         )
         val rowVars = mutableListOf("x3","x4","x5","F")
-        val colVars = mutableListOf("RHS","x1","x2")
+        val colVars = mutableListOf("ЗБП","x1","x2")
         return SwappingColumnsRowsExample.SimplexTable(matrix, rowVars, colVars)
     }
 
