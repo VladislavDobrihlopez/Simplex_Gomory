@@ -10,7 +10,7 @@ import kotlinx.coroutines.ensureActive
  * В реальном проекте лучше использовать уже готовые библиотеки LP/MILP,
  * но здесь приведён учебный пример.
  */
-object SwappingColumnsRowsExample {
+object GomoriSimplexAlgo {
 
     // -------------------- Структуры данных --------------------
 

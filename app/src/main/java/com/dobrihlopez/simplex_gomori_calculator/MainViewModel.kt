@@ -106,7 +106,7 @@ class MainViewModel : ViewModel() {
 
     /**
      * Запуск целочисленного ILP-решения (упрощённый пример).
-     * Используем код из объекта [SwappingColumnsRowsExample], адаптируя под пользовательские данные.
+     * Используем код из объекта [GomoriSimplexAlgo], адаптируя под пользовательские данные.
      */
     private fun solveILP(state: MainViewState) {
         _uiState.update {
@@ -115,7 +115,7 @@ class MainViewModel : ViewModel() {
 
         viewModelScope.launch(Dispatchers.Default) {
             val st = buildTableFromState(state)
-            val (success, message) = SwappingColumnsRowsExample.solveIntegerSimplex(st)
+            val (success, message) = GomoriSimplexAlgo.solveIntegerSimplex(st)
 
             if (!success) {
                 // Ошибка
@@ -125,7 +125,7 @@ class MainViewModel : ViewModel() {
                             isLoaderShown = false,
                             validationErrors = listOf("Решение не найдено: $message"),
                             solutionFound = false,
-                            snapshots = SwappingColumnsRowsExample.latestSnapshots // даже если не найдено, можно показать шаги
+                            snapshots = GomoriSimplexAlgo.latestSnapshots // даже если не найдено, можно показать шаги
                         )
                     }
                 }
@@ -133,7 +133,7 @@ class MainViewModel : ViewModel() {
             }
 
             // Успех
-            val (x1, x2) = SwappingColumnsRowsExample.getSolution(st)
+            val (x1, x2) = GomoriSimplexAlgo.getSolution(st)
             val F = computeF(x1, x2, state.incomeToy1, state.incomeToy2)
             withContext(Dispatchers.Main) {
                 _uiState.update {
@@ -143,7 +143,7 @@ class MainViewModel : ViewModel() {
                         maxIncome = F,
                         solutionFound = true,
                         isLoaderShown = false,
-                        snapshots = SwappingColumnsRowsExample.latestSnapshots
+                        snapshots = GomoriSimplexAlgo.latestSnapshots
                     )
                 }
             }
@@ -153,7 +153,7 @@ class MainViewModel : ViewModel() {
      * Формируем симплекс-таблицу из пользовательских данных.
      * Аналогично buildInitialTable(), но коэффициенты берём из state.
      */
-    private fun buildTableFromState(s: MainViewState): SwappingColumnsRowsExample.SimplexTable {
+    private fun buildTableFromState(s: MainViewState): GomoriSimplexAlgo.SimplexTable {
         /**
          * Пример задачи в общем виде:
          *   s.fabricToy1 * x1 + s.fabricToy2 * x2 <= s.fabricSupply
@@ -178,7 +178,7 @@ class MainViewModel : ViewModel() {
         )
         val rowVars = mutableListOf("x3","x4","x5","F")
         val colVars = mutableListOf("ЗБП","x1","x2")
-        return SwappingColumnsRowsExample.SimplexTable(matrix, rowVars, colVars)
+        return GomoriSimplexAlgo.SimplexTable(matrix, rowVars, colVars)
     }
 
     /**
